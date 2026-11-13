@@ -7,7 +7,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: patch
         run: |
-          sed -i '629a\                    thread::sleep(Duration::from_millis(60));' rust/service/src/session.rs
+          sed -i '629a\                    thread::sleep(Duration::from_millis(150));' rust/service/src/session.rs
           sed -n '626,631p' rust/service/src/session.rs
       - name: build
         run: |
