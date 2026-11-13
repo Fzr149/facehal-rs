@@ -7,8 +7,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: patch
         run: |
-          sed -i '629a\                    thread::sleep(Duration::from_millis(150));' rust/service/src/session.rs
-          sed -n '626,631p' rust/service/src/session.rs
+          sed -i '/set_thread_pool_max_thread_count(4);/i\    unsafe { sched_setaffinity(0, 8, [15u64].as_ptr()); }' rust/service/src/main.rs
+          echo 'extern "C" { fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32; }' >> rust/service/src/main.rs
+          sed -n '13,24p' rust/service/src/main.rs
       - name: build
         run: |
           sed -i 's/-Werror/-Wno-error/' scripts/build-production.sh
