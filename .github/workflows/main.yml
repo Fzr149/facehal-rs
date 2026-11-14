@@ -3,13 +3,25 @@ on: workflow_dispatch
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: patch
         run: |
-          sed -i '/set_thread_pool_max_thread_count(4);/i\    unsafe { sched_setaffinity(0, 8, [15u64].as_ptr()); }' rust/service/src/main.rs
-          echo 'extern "C" { fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32; }' >> rust/service/src/main.rs
-          sed -n '13,24p' rust/service/src/main.rs
+          sed -i 's|send_authentication_frame(&callback, status);|if frame_status_due(status) { send_authentication_frame(\&callback, status); }|' rust/service/src/session.rs
+          cat >> rust/service/src/session.rs <<'EOF'
+
+          fn frame_status_due(status: i32) -> bool {
+              static LAST: Mutex<Option<(i32, Instant)>> = Mutex::new(None);
+              let mut last = LAST.lock().unwrap();
+              let due = match *last {
+                  Some((s, t)) => s != status || t.elapsed() >= Duration::from_millis(1000),
+                  None => true,
+              };
+              if due {
+                  *last = Some((status, Instant::now()));
+              }
+              due
+          }
+          EOF
+          grep -n frame_status_due rust/service/src/session.rs
       - name: build
         run: |
           sed -i 's/-Werror/-Wno-error/' scripts/build-production.sh
