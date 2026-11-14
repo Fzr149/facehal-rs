@@ -8,21 +8,20 @@ jobs:
       - name: patch
         run: |
           sed -i 's|send_authentication_frame(&callback, status);|if frame_status_due(status) { send_authentication_frame(\&callback, status); }|' rust/service/src/session.rs
-          cat >> rust/service/src/session.rs <<'EOF'
-
-          fn frame_status_due(status: i32) -> bool {
-              static LAST: Mutex<Option<(i32, Instant)>> = Mutex::new(None);
-              let mut last = LAST.lock().unwrap();
-              let due = match *last {
-                  Some((s, t)) => s != status || t.elapsed() >= Duration::from_millis(1000),
-                  None => true,
-              };
-              if due {
-                  *last = Some((status, Instant::now()));
-              }
-              due
-          }
-          EOF
+          printf '%s\n' \
+            '' \
+            'fn frame_status_due(status: i32) -> bool {' \
+            '    static LAST: Mutex<Option<(i32, Instant)>> = Mutex::new(None);' \
+            '    let mut last = LAST.lock().unwrap();' \
+            '    let due = match *last {' \
+            '        Some((s, t)) => s != status || t.elapsed() >= Duration::from_millis(1000),' \
+            '        None => true,' \
+            '    };' \
+            '    if due {' \
+            '        *last = Some((status, Instant::now()));' \
+            '    }' \
+            '    due' \
+            '}' >> rust/service/src/session.rs
           grep -n frame_status_due rust/service/src/session.rs
       - name: build
         run: |
@@ -33,11 +32,55 @@ jobs:
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           mkdir -p stubs
-          cat > stubs/syms.txt <<'EOF'
-          ACameraCaptureSession_abortCaptures
-          ACameraCaptureSession_close
-          ACameraCaptureSession_setRepeatingRequest
-          ACameraCaptureSession_stopRepeating
-          ACameraDevice_close
-          ACameraDevice_createCaptureRequest
-          ACamera
+          printf '%s\n' \
+            ACameraCaptureSession_abortCaptures \
+            ACameraCaptureSession_close \
+            ACameraCaptureSession_setRepeatingRequest \
+            ACameraCaptureSession_stopRepeating \
+            ACameraDevice_close \
+            ACameraDevice_createCaptureRequest \
+            ACameraDevice_createCaptureSession \
+            ACameraManager_create \
+            ACameraManager_delete \
+            ACameraManager_deleteCameraIdList \
+            ACameraManager_getCameraCharacteristics \
+            ACameraManager_getCameraIdList \
+            ACameraManager_openCamera \
+            ACameraMetadata_free \
+            ACameraMetadata_getConstEntry \
+            ACameraOutputTarget_create \
+            ACameraOutputTarget_free \
+            ACaptureRequest_addTarget \
+            ACaptureRequest_free \
+            ACaptureRequest_removeTarget \
+            ACaptureRequest_setEntry_u8 \
+            ACaptureSessionOutputContainer_add \
+            ACaptureSessionOutputContainer_create \
+            ACaptureSessionOutputContainer_free \
+            ACaptureSessionOutputContainer_remove \
+            ACaptureSessionOutput_create \
+            ACaptureSessionOutput_free \
+            AImageReader_getWindowNativeHandle \
+            ANativeWindow_readFromParcel \
+            ANativeWindow_writeToParcel > stubs/syms.txt
+          mkstub() {
+            sort -u stubs/syms.txt | sed 's/.*/void &(void){}/' > stubs/stub.c
+            "$CC" -shared -fPIC -nostdlib -Wl,-soname,libcamera2ndk_vendor.so -o stubs/libcamera2ndk_vendor.so stubs/stub.c
+          }
+          mkstub
+          export ANDROID_SYSTEM_LIB64="$PWD/stubs" ANDROID_VENDOR_LIB64="$PWD/stubs"
+          ok=0
+          for i in 1 2 3 4 5; do
+            if sh scripts/build-production.sh > build.log 2>&1; then ok=1; break; fi
+            new=$(grep -oE 'undefined symbol: A[A-Z][A-Za-z0-9]*_[A-Za-z0-9_]+' build.log | awk '{print $3}' | sort -u)
+            [ -n "$new" ] || break
+            echo "auto-stub: $new"
+            echo "$new" >> stubs/syms.txt
+            mkstub
+          done
+          tail -n 60 build.log
+          [ "$ok" = 1 ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facehal
+          path: android.hardware.biometrics.face-service.facehal
